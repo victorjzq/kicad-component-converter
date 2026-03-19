@@ -277,21 +277,57 @@ export const convertKicadJsonToTsCircuitSoup = async (
         ? portNameToPcbPortId.get(portName)
         : undefined
       const pinLabel = pinNumber !== undefined ? `pin${pinNumber}` : undefined
-      circuitJson.push({
-        type: "pcb_smtpad",
-        pcb_smtpad_id: `pcb_smtpad_${smtpadId++}`,
-        shape: "rect",
-        x: pad.at[0],
-        y: -pad.at[1],
-        width,
-        height,
-        layer: convertKicadLayerToTscircuitLayer(pad.layers?.[0] ?? "F.Cu")!,
-        pcb_component_id,
-        port_hints: pinLabel ? [pinLabel] : portName ? [portName] : [],
-        pcb_port_id,
-        pin_number: pinNumber,
-        pin_label: pinLabel,
-      } as any)
+      if (pad.pad_shape === "oval") {
+        // Oval SMD pad → pill shape; radius = half the shorter dimension
+        const radius = Math.min(width, height) / 2
+        circuitJson.push({
+          type: "pcb_smtpad",
+          pcb_smtpad_id: `pcb_smtpad_${smtpadId++}`,
+          shape: "pill",
+          x: pad.at[0],
+          y: -pad.at[1],
+          width,
+          height,
+          radius,
+          layer: convertKicadLayerToTscircuitLayer(pad.layers?.[0] ?? "F.Cu")!,
+          pcb_component_id,
+          port_hints: pinLabel ? [pinLabel] : portName ? [portName] : [],
+          pcb_port_id,
+          pin_number: pinNumber,
+          pin_label: pinLabel,
+        } as any)
+      } else if (pad.pad_shape === "circle") {
+        circuitJson.push({
+          type: "pcb_smtpad",
+          pcb_smtpad_id: `pcb_smtpad_${smtpadId++}`,
+          shape: "circle",
+          x: pad.at[0],
+          y: -pad.at[1],
+          radius: width / 2,
+          layer: convertKicadLayerToTscircuitLayer(pad.layers?.[0] ?? "F.Cu")!,
+          pcb_component_id,
+          port_hints: pinLabel ? [pinLabel] : portName ? [portName] : [],
+          pcb_port_id,
+          pin_number: pinNumber,
+          pin_label: pinLabel,
+        } as any)
+      } else {
+        circuitJson.push({
+          type: "pcb_smtpad",
+          pcb_smtpad_id: `pcb_smtpad_${smtpadId++}`,
+          shape: "rect",
+          x: pad.at[0],
+          y: -pad.at[1],
+          width,
+          height,
+          layer: convertKicadLayerToTscircuitLayer(pad.layers?.[0] ?? "F.Cu")!,
+          pcb_component_id,
+          port_hints: pinLabel ? [pinLabel] : portName ? [portName] : [],
+          pcb_port_id,
+          pin_number: pinNumber,
+          pin_label: pinLabel,
+        } as any)
+      }
     } else if (pad.pad_type === "thru_hole") {
       if (pad.pad_shape === "rect") {
         const rotation = getRotationDeg(pad.at as any)
@@ -346,6 +382,18 @@ export const convertKicadJsonToTsCircuitSoup = async (
           pin_label: pinLabel,
         } as any)
       } else if (pad.pad_shape === "oval") {
+        const rotation = getRotationDeg(pad.at as any)
+        const offX = pad.drill?.offset?.[0] ?? 0
+        const offY = pad.drill?.offset?.[1] ?? 0
+        const rotOff = rotatePoint(offX, offY, rotation)
+        const outer_width = isNinetyLike(rotation) ? pad.size[1] : pad.size[0]
+        const outer_height = isNinetyLike(rotation) ? pad.size[0] : pad.size[1]
+        const hole_width = isNinetyLike(rotation)
+          ? (pad.drill?.height ?? pad.drill?.width!)
+          : pad.drill?.width!
+        const hole_height = isNinetyLike(rotation)
+          ? pad.drill?.width!
+          : (pad.drill?.height ?? pad.drill?.width!)
         const pcb_port_id = portName
           ? portNameToPcbPortId.get(portName)
           : undefined
@@ -354,12 +402,13 @@ export const convertKicadJsonToTsCircuitSoup = async (
           type: "pcb_plated_hole",
           pcb_plated_hole_id: `pcb_plated_hole_${platedHoleId++}`,
           shape: "pill",
-          x: pad.at[0],
-          y: -pad.at[1],
-          outer_width: pad.size[0],
-          outer_height: pad.size[1],
-          hole_width: pad.drill?.width!,
-          hole_height: pad.drill?.height!,
+          // x/y are the pad center; apply drill offset
+          x: pad.at[0] + rotOff.x,
+          y: -(pad.at[1] + rotOff.y),
+          outer_width,
+          outer_height,
+          hole_width,
+          hole_height,
           layers: ["top", "bottom"],
           pcb_component_id,
           port_hints: pinLabel ? [pinLabel] : portName ? [portName] : [],
